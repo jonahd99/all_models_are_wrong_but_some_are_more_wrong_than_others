@@ -1,0 +1,145 @@
+################################################################################
+# Preamble                                                                     #
+################################################################################
+
+library("here")
+library("tidyverse")
+library("janitor")
+
+my_theme <- theme_classic()
+
+theme_set(my_theme)
+
+################################################################################
+# Mitchell - Data                                                              #
+################################################################################
+
+mitchell_phys <- read_csv(here("data","mitchell_data_phys.csv")) %>%
+  clean_names() %>%
+  rename(id = participant_id)
+
+IDs <- mitchell_phys %>%
+  pull(id) %>%
+  unique() 
+
+ppo_tib <- mitchell_phys %>%
+  select(id,ppo) %>% rename(power = ppo) %>%
+  mutate(durations = 1,
+         effort_id = 6) 
+
+
+
+mitchell_pow <- read_csv(here("data","mitchell_data_pow.csv")) %>%
+  clean_names() %>%
+  rename(durations = duration) %>%
+  cbind(effort_id = rep(1:5, each = length(IDs)))
+################################################################################
+# Mitchell - Fitting the critical-power model to each athlete                  #
+################################################################################
+
+fit_cp_lr_pow <- function(data_cp,t){
+  cp_lr <- lm(data = data_cp, power ~ I(1/durations))
+  w_prime <- cp_lr$coefficients["I(1/durations)"]
+  cp <- cp_lr$coefficients["(Intercept)"]
+  cp_power <- w_prime/t + cp
+  
+  return(list(cp = cp,
+              w_prime = w_prime,
+              duration = t,
+              power = cp_power))
+}
+
+
+aux_IDs <- mitchell_pow %>%
+  pull(id) %>%
+  unique() 
+
+cp_tib <- tibble()
+
+cp_tib_plot <- tibble()
+t_p <- 1:(max(mitchell_pow$durations, na.rm = TRUE) * 1.1)
+
+for (i in aux_IDs) {
+  data_cp_i <- mitchell_pow %>%
+    filter(id == i)
+  cp_list_i <- fit_cp_lr_pow(data_cp = data_cp_i, t = t_p)
+  cp_tib_aux <- tibble(id = i,
+                       cp = cp_list_i$cp,
+                       w_prime = cp_list_i$w_prime)
+  cp_tib <- rbind(cp_tib,cp_tib_aux)
+  
+  cp_tib_plot_aux <- tibble(id = i,
+                           durations = cp_list_i$duration,
+                          power = cp_list_i$power)
+  
+  cp_tib_plot <- rbind(cp_tib_plot,cp_tib_plot_aux)
+}
+
+ggplot(mapping = aes(x = durations, y = power)) +
+  geom_point(data = mitchell_pow) +
+  geom_line(data = cp_tib_plot) +
+  scale_x_continuous(trans = "log") +
+  scale_y_continuous(trans = "log") +
+  facet_wrap(~id)
+
+
+################################################################################
+# Mitchell - Correlation plot for S                                            #
+################################################################################
+
+corr_plot_tib <- mitchell_phys %>%
+  left_join(cp_tib, by = "id")
+
+corr_plot_tib_test <-  corr_plot_tib %>%
+  select(id,cp,percent_type_1,percent_type_2, mhc_i_csa,mhc_ii_csa,c_density_mm2, c_f,caf_mhc_i,caf_mhc_ii) %>%
+  gather(key = "var", value = "value", -c("id","cp")) %>%
+  group_by(var) %>%
+  mutate(correlation = cor(value,cp,use="complete.obs"),
+         p_val = cor.test(value,cp,use="complete.obs")$p.value,
+         x_pos =  (max(value, na.rm = TRUE) - min(value, na.rm = TRUE)) * 0.9 + min(value, na.rm = TRUE),
+         y_pos =  460, 
+         lab = if_else(round(p_val,3) < 0.001,paste("r =", round(correlation, 3),"\np < 0.001") ,
+                       paste("r =", round(correlation, 3),"\np =", round(p_val,3)))) 
+
+corr_plot_tib_test %>%
+  ggplot(aes(x = value, y = cp)) +
+  geom_point() +
+  geom_text(mapping = aes(x = x_pos, y = y_pos, label = lab)) + 
+  geom_smooth(method = "lm", formula = 'y~x', se = FALSE) +
+  labs(x = "") +
+  scale_colour_manual(values = c("black", "red"))+
+  facet_wrap(~factor(var, levels=c(corr_plot_tib_test %>%
+                                     pull(var) %>%
+                                     unique())), scales = "free", ncol = 2) +
+  coord_cartesian(ylim = c(0,500)) -> cp_cor
+
+ggsave(here("figures","cp_par_cor_plot.png"), plot = cp_cor, dpi = 320)
+
+
+corr_plot_tib_test <-  corr_plot_tib %>%
+  select(id,E,c_density_mm2,c_f,caf_mhc_i,caf_mhc_ii,
+         mhc_i_csa,mhc_ii_csa,mhc_i_caf,mhc_ii_caf,no_mhc_i,no_mhc_ii,
+         percent_type_1,percent_type_2,sharing_i,sharing_ii,vo2max_l_min,vo2max_ml_min_kg) %>%
+  gather(key = "var", value = "value", -c("id","E")) %>%
+  group_by(var) %>%
+  mutate(correlation = cor(value,E,use="complete.obs"),
+         p_val = cor.test(value,E,use="complete.obs")$p.value,
+         x_pos =  (max(value, na.rm = TRUE) - min(value, na.rm = TRUE)) * 0.8 + min(value, na.rm = TRUE),
+         y_pos =  0.86, 
+         lab = paste("r =", round(correlation, 3),"\np =", round(p_val,3)))  %>%
+  mutate(is_good = if_else(id %in% c(8,5,7,15,14), "red","black")) %>%
+  filter(correlation > 0.5 | correlation < -0.5) 
+
+corr_plot_tib_test %>%
+  ggplot(aes(x = value, y = E)) +
+  geom_point() +
+  geom_text(mapping = aes(x = x_pos, y = y_pos, label = lab)) + 
+  geom_smooth(method = "lm", formula = 'y~x', se = FALSE) +
+  labs(x = "") +
+  scale_colour_manual(values = c("black", "red"))+
+  facet_wrap(~ var, scales = "free") +
+  coord_cartesian(ylim = c(0.8,0.87)) -> E_cor
+
+ggsave(here("figures","Endurance_par_cor_plot.png"), plot = E_cor, dpi = 320)
+
+

@@ -1,0 +1,91 @@
+################################################################################
+# Preamble                                                                     #
+################################################################################
+
+library("here")
+library("tidyverse")
+library("janitor")
+library("readxl")
+
+my_theme <- theme_classic(base_size = 16) 
+
+theme_set(my_theme)
+
+# Colours
+col_hyp <- "#F8766D"
+col_pow <- "#00BFC4"
+
+################################################################################
+# Mitchell - Data                                                              #
+################################################################################
+
+mitchell_phys <- read_csv(here("data","mitchell_data_phys.csv")) %>%
+  clean_names() %>%
+  rename(id = participant_id)
+
+IDs <- mitchell_phys %>%
+  pull(id) %>%
+  unique() 
+
+apo_tib <- mitchell_phys %>%
+  select(id,apo) %>% rename(power = apo) %>%
+  mutate(durations = 5,
+         effort_id = 6)
+
+
+
+mitchell_pow <- read_csv(here("data","mitchell_data_pow.csv")) %>%
+  clean_names() %>%
+  rename(durations = duration)
+
+alex_pow <- read_csv(here("data","alex_tte.csv")) %>%
+  clean_names() %>%
+  rename(id = athlete)
+
+cp_test_data <- rbind(mitchell_pow,alex_pow)
+
+################################################################################
+# Mitchell - Fitting the power-law model to each athlete                       #
+################################################################################
+
+fit_pow_lr_pow_calc_cp <- function(data_pl, critical_power){
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)))
+  a <- as.numeric(exp(coef(pl_lr)[1]))
+  b <- as.numeric(-coef(pl_lr)[2])
+  pl_duration <- max((a/critical_power)^(1/b))
+  return(list(S = a,
+              E = 1-b,
+              duration = pl_duration))
+}
+
+
+aux_IDs <- cp_test_data %>%
+  pull(id) %>%
+  unique() 
+
+pl_vs_cp_tib <- tibble()
+
+for (i in aux_IDs) {
+  data_i <- cp_test_data %>%
+    filter(id == i  & durations >= 120 & durations <= 1200) 
+  
+  cp_lr <- lm(data = data_i, power ~ I(1/durations))
+  w_prime <- cp_lr$coefficients["I(1/durations)"]
+  cp <- cp_lr$coefficients["(Intercept)"]
+  
+  fit_list <- fit_pow_lr_pow_calc_cp(data_pl = data_i, critical_power = cp)
+  
+  pl_vs_cp_tib_aux <- tibble(id = i,
+                             critical_power = cp,
+                             w_prime = w_prime,
+                             E = fit_list$E,
+                             S = fit_list$S,
+                             pred_cp_d = fit_list$duration/60)
+  
+  pl_vs_cp_tib <- rbind(pl_vs_cp_tib,pl_vs_cp_tib_aux)
+}
+
+pl_vs_cp_tib %>%
+  ggplot() +
+  geom_density(mapping = aes(x = pred_cp_d))
+

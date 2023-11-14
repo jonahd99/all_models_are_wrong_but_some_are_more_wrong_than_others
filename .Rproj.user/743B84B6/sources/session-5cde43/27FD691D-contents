@@ -1,0 +1,187 @@
+################################################################################
+# Preamble                                                                     #
+################################################################################
+
+library("here")
+library("tidyverse")
+library("janitor")
+
+my_theme <- theme_classic()
+
+theme_set(my_theme)
+
+# Colours
+col_hyp <- "#F8766D"
+col_pow <- "#00BFC4"
+
+################################################################################
+# Running data                                                                 #
+################################################################################
+
+df_power_of_10 <- read_rds(here("data", "df_power_of_10.Rds")) %>%
+  select(!type)
+
+
+df_power_of_10 %>%
+  filter(distance == 42194.988) %>%
+  pull(id) %>%
+  unique() -> ID_run_marathon
+
+df_power_of_10 %>%
+  filter(id %in% ID_run_marathon) %>%
+  group_by(id) %>%
+  summarise(n_dis = n_distinct(distance),
+            n_train = n()) %>%
+  filter(n_dis >= 2 & n_train >= 3) %>%
+  pull(id) %>%
+  unique() -> ID_enough_train
+
+df_power_of_10 %>%
+  filter(id %in% ID_enough_train) %>%
+  filter(distance == 42194.988) %>% 
+  group_by(id) %>%
+  summarise(n_marathons = n()) -> df_n_marathons
+
+df_power_of_10 %>%
+  filter(distance == 42194.988 & id %in% ID_enough_train) %>%
+  mutate(date_lb = date %m-% months(4)) %>%
+  group_by(id) %>%
+  mutate(marathon_n = row_number(),
+         updated_id = paste0(id,"_",marathon_n)) %>%
+  ungroup() %>%
+  select(id,updated_id,marathon_n,date,date_lb,distance,duration,power) %>%
+  rename(date_up = date) -> marathons_only
+
+df_power_of_10 %>%
+  filter(id %in% ID_enough_train)  -> marathons_excluded
+
+duplicated_training_data <- tibble()
+
+output_vec <- seq(from = 1000, to = length(ID_enough_train), by = 1000)
+
+re_wrangle <- FALSE
+
+if(re_wrangle == TRUE){
+  for(i in 1:length(ID_enough_train)){
+  
+    if(i %in% output_vec){
+      print(paste(i,"/",max(output_vec)))
+    }
+    
+    ID <- ID_enough_train[i]
+    n_marathons <- df_n_marathons %>%
+      filter(id == ID) %>%
+      pull(n_marathons)
+    
+    df_i <- marathons_excluded %>%
+      filter(id == ID)
+    
+    aux_marathon_n <- rep(1:n_marathons, each = nrow(df_i))
+    
+    duplicated_training_data_aux <- df_i %>%
+      slice(rep(1:n(), times = n_marathons)) %>%
+      cbind(marathon_n = aux_marathon_n) %>%
+      mutate(updated_id = paste0(id, "_", marathon_n))
+    duplicated_training_data <- rbind(duplicated_training_data,duplicated_training_data_aux)
+  }
+  
+  saveRDS(duplicated_training_data,here("data","duplicated_training_data.RDS"))
+}else{
+  duplicated_training_data <- readRDS(here("data","duplicated_training_data.RDS"))
+  }
+
+marathons_only %>%
+  select(updated_id,date_lb,date_up) %>%
+  left_join(duplicated_training_data, by = c("updated_id"), multiple = "all") %>%
+  mutate(is_in = if_else(date >= date_lb & date < date_up,1,0)) %>%
+  filter(is_in == 1 & distance >= 1500) %>%
+  group_by(updated_id) %>%
+  summarise(n_dis = n_distinct(distance),
+            n_train = n()) %>%
+  filter(n_dis >= 3 & n_train >= 3) %>%
+  pull(updated_id) %>%
+  unique() -> ID_final
+
+
+
+
+ 
+marathons_only %>%
+  select(updated_id,date_lb,date_up, duration, power, marathon_n) %>%
+  rename(act_duration = duration,
+         act_velocity = power) %>%
+  left_join(duplicated_training_data, by = c("updated_id","marathon_n"), multiple = "all") %>%
+  mutate(is_in = if_else(date >= date_lb & date < date_up,1,0)) %>%
+  filter(is_in == 1 & updated_id %in% ID_final) -> training_data
+
+
+  
+
+get_E <- function(power,durations){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)))
+  b <- 1 - as.numeric(-coef(pl_lr)[2])
+  return(b)
+}
+
+get_S <- function(power,durations){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)))
+  a <- as.numeric(exp(coef(pl_lr)[1]))
+  return(a)
+}
+
+get_E_weighted <- function(power,durations,dates){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)), weights = dates)
+  b <- 1 - as.numeric(-coef(pl_lr)[2])
+  return(b)
+}
+
+get_S_weighted <- function(power,durations,dates){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)),weights = dates)
+  a <- as.numeric(exp(coef(pl_lr)[1]))
+  return(a)
+}
+
+marathons_only %>%
+  select(updated_id,duration) %>%
+  rename(mar_fin_time_act = duration) -> final_lj
+
+training_data %>%
+  group_by(updated_id) %>%
+  mutate(weighting = 1/as.numeric(date_up - date)) %>%
+  summarise(E = get_E(power = power, durations = duration),
+            S = get_S(power = power, durations = duration),
+            E_w = get_E_weighted(power = power, durations = duration, dates = date),
+            S_w = get_S_weighted(power = power, durations = duration, dates = date)) %>%
+  #filter(E <= 1 & E > 0) %>%
+  mutate(mar_fin = (42194.988/S)^(1/(E)),
+         mar_fin_w = (42194.988/S_w)^(1/(E_w))) %>%
+  left_join(final_lj, by = "updated_id") %>%
+  mutate(error = abs(mar_fin - mar_fin_time_act)/ mar_fin_time_act,
+         error_w = abs(mar_fin_w - mar_fin_time_act)/ mar_fin_time_act) -> check
+
+mean(check$error, na.rm = TRUE)
+mean(check$error_w, na.rm = TRUE)
+
+
+training_data %>%
+  group_by(updated_id) %>%
+  mutate(weighting = 1/as.numeric(date_up - date)) %>%
+  summarise(E = get_E(power = power, durations = duration),
+            S = get_S(power = power, durations = duration)) %>%
+  filter(S > 100) %>%
+  pull(updated_id) %>%
+  unique() -> testing_data_ids
+
+training_data %>%
+  filter(updated_id %in% testing_data_ids) %>%
+  ggplot() +
+   geom_point(mapping = aes(x = distance, y = power)) +
+  facet_wrap(~updated_id) -> testing_data_plot
+
+ggsave(here("figures","testing_data_plot.png"), dpi = 3200)
+
+

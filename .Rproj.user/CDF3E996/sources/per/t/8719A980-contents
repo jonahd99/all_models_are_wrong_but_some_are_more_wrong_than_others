@@ -1,0 +1,84 @@
+################################################################################
+# Preamble                                                                     #
+################################################################################
+
+library("here")
+library("tidyverse")
+library("janitor")
+library("scales")
+
+my_theme <- theme_classic()
+
+theme_set(my_theme)
+
+# Colours
+col_hyp <- "#F8766D"
+col_pow <- "#00BFC4"
+
+################################################################################
+# Running data                                                                 #
+################################################################################
+
+df_power_of_10 <- read_rds(here("data", "df_power_of_10.Rds")) %>%
+  select(!type)
+
+df_power_of_10 %>%
+  filter(duration >= 120 & duration <= 1200) %>%
+  group_by(id) %>%
+  summarise(n_dis = n_distinct(distance),
+            n_train = n()) %>%
+  filter(n_dis >= 3 & n_train >= 3) %>%
+  pull(id) %>%
+  unique() -> ID_enough_train
+
+
+fitting_data_set <- df_power_of_10 %>%
+  filter(id %in% ID_enough_train)
+
+
+
+get_E <- function(power,durations){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)))
+  b <- 1 - as.numeric(-coef(pl_lr)[2])
+  return(b)
+}
+
+get_S <- function(power,durations){
+  data_pl <- tibble(power = power, durations = durations)
+  pl_lr <- lm(data = data_pl, I(log(power)) ~ I(log(durations)))
+  a <- as.numeric(exp(coef(pl_lr)[1]))
+  return(a)
+}
+
+get_cp <- function(power,durations){
+  data_cp <- tibble(power = power, durations = durations) %>%
+    filter(durations >= 120 & durations <= 1200)
+  cp_lr <- lm(data = data_cp, power ~ I(1/durations))
+  cp <- cp_lr$coefficients["(Intercept)"]
+  return(cp)
+}
+
+
+fitting_data_set %>%
+  group_by(id) %>%
+  summarise(E = get_E(power = power, durations = duration),
+            S = get_S(power = power, durations = duration),
+            CP = get_cp(power = power, durations = duration)) %>%
+  filter(E <= 0.98 & E > 0 & S < 15 & S > 0) %>%
+  group_by(id) %>%
+  mutate(pred_cp = max((S/CP)^(1/(1-E))/60, na.rm = TRUE))  -> check
+
+check %>%
+  pull(id) %>%
+  length()
+
+check %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = pred_cp), bins = 900, fill = col_pow, colour = "black") +
+  labs(x = "Predicted TTE (min) of CP from the PL model", y = "Count") +
+  coord_cartesian(xlim = c(0, 60)) +
+  scale_x_continuous(expand = c(0,0), breaks = breaks_pretty(n = 12)) +
+  scale_y_continuous(expand = c(0,0),breaks = breaks_pretty()) -> cp_duration_hist
+
+ggsave(here("figures","cp_duration_hist_2_20.png"), plot = cp_duration_hist, dpi = 320)

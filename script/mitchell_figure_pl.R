@@ -178,7 +178,7 @@ corr_plot_tib_test %>%
   coord_cartesian(ylim = c(150, 435)) +
   theme(strip.background = element_blank(), strip.placement = "outside") -> pl_30_cor
 
-ggsave(here("figures","pl_30_par_cor_plot.png"), plot = pl_30_cor, dpi = 320, width = 0.5 * 8, height =  0.5 * 12)
+ggsave(here("figures","pl_30_par_cor_plot.png"), plot = pl_30_cor, dpi = 3200, width = 0.5 * 8, height =  0.5 * 12)
 
 
 ################################################################################
@@ -223,5 +223,5 @@ corr_plot_tib_test  %>%
   coord_cartesian(ylim = c(0.77,0.94)) +
   theme(strip.background = element_blank(), strip.placement = "outside") -> E_cor
 
-ggsave(here("figures","Endurance_par_cor_plot.png"), plot = E_cor, dpi = 320, width = 0.5 * 8, height = 0.5 * 12)
+ggsave(here("figures","Endurance_par_cor_plot.png"), plot = E_cor, dpi = 3200, width = 0.5 * 8, height = 0.5 * 12)
 

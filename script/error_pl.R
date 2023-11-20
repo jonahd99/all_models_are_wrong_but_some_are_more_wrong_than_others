@@ -1,4 +1,10 @@
 ################################################################################
+# Read me                                                                      #
+################################################################################
+
+
+
+################################################################################
 # Preamble                                                                     #
 ################################################################################
 
@@ -23,12 +29,13 @@ df_power_of_10 %>%
   pull(id) %>%
   unique() -> ID_run_marathon
 
+
 ################################################################################
 # IDs of runners that initially enough training points                         #
 ################################################################################
 
 df_power_of_10 %>%
-  filter(id %in% ID_run_marathon & distance != 42194.988 & distance >= 1500) %>%
+  filter(id %in% ID_run_marathon & distance != 42194.988 & distance >= 400) %>%
   group_by(id) %>%
   summarise(n_dis = n_distinct(distance),
             n_train = n()) %>%
@@ -72,7 +79,7 @@ df_power_of_10 %>%
 ###############################################################################
 
 df_power_of_10 %>%
-  filter(id %in% ID_enough_train_init & distance >= 1500)  -> training_data_init
+  filter(id %in% ID_enough_train_init & distance >= 400)  -> training_data_init
 
 ###############################################################################
 # For each athlete, create a dataset that contains duplicated training        #
@@ -122,7 +129,7 @@ marathons_only %>%
   select(updated_id,date_lb,date_up) %>%
   left_join(duplicated_training_data, by = c("updated_id"), multiple = "all") %>%
   mutate(is_in = if_else(date >= date_lb & date < date_up,1,0)) %>%
-  filter(is_in == 1 & distance >= 1500) %>%
+  filter(is_in == 1 & distance >= 400) %>%
   group_by(updated_id) %>%
   summarise(n_dis = n_distinct(distance),
             n_train = n()) %>%
@@ -177,13 +184,11 @@ marathons_only %>%
 # Calculating the error for each marathon                                     #
 ###############################################################################
 
-
 training_data %>%
   group_by(updated_id) %>%
   mutate(weighting = 1/as.numeric(date_up - date)) %>%
   summarise(E = get_E(power = power, durations = duration),
             S = get_S(power = power, durations = duration)) %>%
-  filter(E <= 1 & E > 0) %>% # Out of bounds for the E parameter -- 14/1697 marathons removed
   mutate(mar_fin = (42194.988/S)^(1/(E))) %>%
   left_join(marathon_fin_time_df, by = "updated_id") %>%
   mutate(error = abs(mar_fin - mar_fin_time)/ mar_fin_time) -> error_df
@@ -192,7 +197,7 @@ training_data %>%
 
 
 ###############################################################################
-# Average error for N =  1683                                                 #
+# Average error for N =  1697                                                 #
 ###############################################################################
 
 mean(error_df$error, na.rm = TRUE)

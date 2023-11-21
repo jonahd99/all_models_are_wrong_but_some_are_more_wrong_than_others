@@ -1,9 +1,15 @@
 ################################################################################
 # Read me                                                                      #
 ################################################################################
-
-
-
+# In this script we calculate the error of the power-law model for 1697 
+# marathons derived from the Blythe and Kiraly (2016) power of 10 dataset.
+# The first section of the script creates a dataset of marathons in which 
+# there are enough training data points to fit the power-law model (i.e,. 
+# at least 3 distinct distances and 3 different races within 4 months of the
+# of the marathon in question). We chose 4 months as this is what Smyth et al.
+# approximately ended up using in their paper. Note: We chose to filter out 
+# distances below 400m as the data set has anomalies which come from the 
+# conversion from race times to durations.
 ################################################################################
 # Preamble                                                                     #
 ################################################################################
